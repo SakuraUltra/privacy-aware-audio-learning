@@ -24,10 +24,32 @@ import argparse
 parser = argparse.ArgumentParser(description="OpenSMILE Audio Classification Training")
 parser.add_argument('--em', type=str, default='Normal',
                     help="Experiment mode: 'DP' for Differential Privacy, 'Normal' for standard training")
+parser.add_argument('--epsilon', type=float, default=8.0,
+                    help="Epsilon value for Differential Privacy")
 args = parser.parse_args()
-# 设置实验模式
+
+
+# logger
+import sys
+class Tee(object):
+    def __init__(self, *files):
+        self.files = files
+    def write(self, obj):
+        for f in self.files:
+            f.write(obj)
+            f.flush()
+    def flush(self):
+        for f in self.files:
+            f.flush()
+
+logfile = open(f"results/training_log_{args.em.lower()}{f'_eps{args.epsilon}' if args.em.lower()=='dp' else ''}.txt", "w")
+sys.stdout = Tee(sys.stdout, logfile)
+
+# Set exp mode
 if args.em.lower() == "dp":
     import config_DP as config
+    if args.epsilon:
+        config.DP_PARAMS['target_epsilon'] = args.epsilon
 else:
     import config
 
@@ -54,14 +76,14 @@ def main():
         print(f"Error: {e}. Make sure CSV files are in the correct path.")
         return
 
-    # 3. K-Fold 交叉验证
+    # 3. K-Fold
     all_folds = range(1, config.GENERAL['num_folds'] + 1)
     all_fold_best_metrics = defaultdict(list)
 
     for fold_idx, val_fold_num in enumerate(all_folds):
         print(f"\n--- Starting Fold {fold_idx + 1}/{config.GENERAL['num_folds']} (Validation Fold: {val_fold_num}) ---")
 
-        # 划分训练集和验证集
+        # split traning and val
         val_speakers = speaker_fold_df[speaker_fold_df['fold'] == val_fold_num]['speaker_id'].tolist()
         train_folds = [f for f in all_folds if f != val_fold_num]
         train_speakers = speaker_fold_df[speaker_fold_df['fold'].isin(train_folds)]['speaker_id'].tolist()
@@ -69,16 +91,15 @@ def main():
         train_df = full_df[full_df['speaker_id'].isin(train_speakers)].reset_index(drop=True)
         val_df = full_df[full_df['speaker_id'].isin(val_speakers)].reset_index(drop=True)
 
-        # 创建 Dataset 和 DataLoader
+        # Dataset 和 DataLoader
         train_set = OpenSMILEAudioDataset(train_df, from_df=True)
         val_set = OpenSMILEAudioDataset(val_df, from_df=True)
         
-        # 注意：DP模式下 DataLoader 的 shuffle 必须为 False，由Opacus处理
         shuffle_train = False if config.EXPERIMENT_MODE == 'DP' else True
         train_loader = DataLoader(train_set, batch_size=config.DATA['batch_size'], shuffle=shuffle_train, collate_fn=collate_fn_with_padding)
         val_loader = DataLoader(val_set, batch_size=config.DATA['batch_size'], shuffle=False, collate_fn=collate_fn_with_padding)
 
-        # 初始化模型、优化器和损失函数
+        # initialize model, optimizer, and criterion
         model = TransformerClassifier(
             d_model=config.MODEL['d_model'],
             nhead=config.MODEL['nhead'],
@@ -91,12 +112,12 @@ def main():
         
         optimizer = optim.Adam(model.parameters(), lr=config.TRAINING['lr'])
         criterion = nn.CrossEntropyLoss()
-        
-        # 初始化 Trainer
-        # DP模式下需要传入训练集长度来计算采样率
+
+        # initialize Trainer
         trainer = Trainer(config, model, optimizer, criterion, config.GENERAL['device'], config.EXPERIMENT_MODE, len(train_set))
 
-        # 训练和评估循环
+        # traning and evaluation loop
+        # reset best metrics for each fold
         best_fold_val_acc = -np.inf
         best_fold_metrics = {}
         val_metrics = trainer.evaluate(val_loader)
