@@ -3,10 +3,10 @@ import torch
 EXPERIMENT_MODE = 'NORMAL'  # 可选值：'DP' 或 'NORMAL'
 
 GENERAL = {
-    'seed': 10086,
+    'seed': 666,
     'device': torch.device("cuda"),
     'num_folds': 5,
-    'epochs': 5,
+    'epochs': 3,
 }
 
 DATA = {
@@ -21,15 +21,16 @@ MODEL = {
     'num_layers': 4,
     'num_classes': 2,
     'dim_feedforward': 256,
-    'dropout': 0.3,
+    'dropout': 0.5,
 }
 
 TRAINING = {
-    'lr': 3e-4,
+    'lr': 1e-4,
+    'weight_decay': 1e-5,
 }
 
 DP_PARAMS = {
-    'target_epsilon': 5.0,
+    'target_epsilon': 8.0,
     'target_delta': 1e-5,
     'max_grad_norm': 1.2,
 }
