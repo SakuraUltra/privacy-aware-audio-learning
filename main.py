@@ -6,6 +6,7 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
 import warnings
+from trainer import Trainer
 
 # 抑制特定的运行时警告
 warnings.filterwarnings('ignore', category=RuntimeWarning, module='opacus')
@@ -16,7 +17,6 @@ warnings.filterwarnings('ignore', category=UserWarning, module='torch')
 from utils.utils import set_seed
 from data.dataset import OpenSMILEAudioDataset, collate_fn_with_padding
 from models.transformer import TransformerClassifier
-from trainer import Trainer
 
 import argparse
 
@@ -26,6 +26,8 @@ parser.add_argument('--em', type=str, default='Normal',
                     help="Experiment mode: 'DP' for Differential Privacy, 'Normal' for standard training")
 parser.add_argument('--epsilon', type=float, default=8.0,
                     help="Epsilon value for Differential Privacy")
+parser.add_argument('--lambda_adv', type=float, default=0.5,
+                    help="Lambda value for adversarial training")
 args = parser.parse_args()
 
 
@@ -50,6 +52,10 @@ if args.em.lower() == "dp":
     import config_DP as config
     if args.epsilon:
         config.DP_PARAMS['target_epsilon'] = args.epsilon
+elif args.em.lower() == "advasr":
+    import config_AdvASR as config
+    if args.lambda_adv is not None:
+        config.ADVERSARIAL_PARAMS['lambda_adv'] = args.lambda_adv
 else:
     import config
 
@@ -110,11 +116,22 @@ def main():
             dp_mode=(config.EXPERIMENT_MODE == 'DP')
         ).to(config.GENERAL['device'])
         
-        optimizer = optim.Adam(model.parameters(), lr=config.TRAINING['lr'])
-        criterion = nn.CrossEntropyLoss()
-
-        # initialize Trainer
-        trainer = Trainer(config, model, optimizer, criterion, config.GENERAL['device'], config.EXPERIMENT_MODE, len(train_set))
+        # Initialize trainer
+        if config.EXPERIMENT_MODE == 'DP':
+            print("DP Mode: Creating separate optimizers for Encoder and Classifier.")
+            optimizer_encoder = optim.AdamW(model.encoder.parameters(), lr=config.TRAINING['lr'], weight_decay=config.TRAINING['weight_decay'])
+            optimizer_classifier = optim.AdamW(model.classifier.parameters(), lr=config.TRAINING['lr'], weight_decay=config.TRAINING['weight_decay'])
+            optimizers = (optimizer_encoder, optimizer_classifier)
+            criterion = nn.CrossEntropyLoss()
+            trainer = Trainer(config, model, optimizers, criterion, config.GENERAL['device'], config.EXPERIMENT_MODE, len(train_set))
+        elif config.EXPERIMENT_MODE == 'ADVASR':
+            # 暂时停用ADVASR相关逻辑
+            print("ADVASR mode is currently disabled.")
+            return
+        else:  # NORMAL
+            optimizer = optim.AdamW(model.parameters(), lr=config.TRAINING['lr'], weight_decay=config.TRAINING['weight_decay'])
+            criterion = nn.CrossEntropyLoss()
+            trainer = Trainer(config, model, optimizer, criterion, config.GENERAL['device'], config.EXPERIMENT_MODE, len(train_set))
 
         # traning and evaluation loop
         # reset best metrics for each fold
@@ -124,10 +141,20 @@ def main():
         print(f"  [Fold {fold_idx+1}, Epoch {0}] | Val Acc: {val_metrics['acc']:.4f}, F1: {val_metrics['f1']:.4f}")
 
         for epoch in range(1, config.GENERAL['epochs'] + 1):
-            avg_train_loss = trainer.train_epoch(train_loader)
+            train_result = trainer.train_epoch(train_loader)
             val_metrics = trainer.evaluate(val_loader)
+            
+            # Handle different return formats from train_epoch
+            if isinstance(train_result, tuple):
+                # AdversarialTrainer returns (avg_loss, avg_utility_loss, avg_adv_loss)
+                avg_train_loss = train_result[0]
+                loss_str = f"Train Loss: {avg_train_loss:.4f}"
+            else:
+                # Normal Trainer returns just avg_loss
+                avg_train_loss = train_result
+                loss_str = f"Train Loss: {avg_train_loss:.4f}"
                 
-            print(f"  [Fold {fold_idx+1}, Epoch {epoch}] Train Loss: {avg_train_loss:.4f} | Val Acc: {val_metrics['acc']:.4f}, F1: {val_metrics['f1']:.4f}")
+            print(f"  [Fold {fold_idx+1}, Epoch {epoch}] {loss_str} | Val Acc: {val_metrics['acc']:.4f}, F1: {val_metrics['f1']:.4f}")
                 
             if val_metrics['acc'] > best_fold_val_acc:
                 best_fold_val_acc = val_metrics['acc']
