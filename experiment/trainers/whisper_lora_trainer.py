@@ -174,7 +174,7 @@ class WhisperLoRATrainer:
         self.trainer.save_model(self.args.output_dir)
         return train_output
 
-    def load_speaker_folds(self, fold_file_path="/home/siyuan/Opensmile_project/data/speaker_folds.csv"):
+    def load_speaker_folds(self, fold_file_path="../data/speaker_folds.csv"):
         """加载预定义的说话人折分配"""
         import pandas as pd
 

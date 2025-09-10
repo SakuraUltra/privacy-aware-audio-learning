@@ -15,7 +15,7 @@ from typing import Optional, Tuple
 from datasets import Dataset as HFDataset
 
 # 添加 whisper_finetune 路径
-whisper_finetune_path = "/home/siyuan/Opensmile_project/whisper_finetune"
+whisper_finetune_path = "../whisper_finetune"
 if whisper_finetune_path not in sys.path:
     sys.path.insert(0, whisper_finetune_path)
 
@@ -28,7 +28,7 @@ class MELWhisperDataset(Dataset):
     基于现有 OpenSMILEWhisperDataset 的 MEL 特征数据集
     复用现有的 padding 和处理逻辑
     """
-    def __init__(self, df, tokenizer, mel_base_dir="/home/siyuan/Opensmile_project/experiment/audio_mel/data-mel"):
+    def __init__(self, df, tokenizer, mel_base_dir="audio_mel/data-mel"):
         self.df = df
         self.tokenizer = tokenizer
         self.mel_base_dir = mel_base_dir
@@ -91,7 +91,7 @@ class MELWhisperDataset(Dataset):
 
 
 def create_mel_datasets_for_cv(
-    csv_path: str = "/home/siyuan/Opensmile_project/experiment/audio_mel/data-mel/mel_dataset.csv",
+    csv_path: str = "audio_mel/data-mel/mel_dataset.csv",
     model_name: str = "openai/whisper-large-v3-turbo",
     language: str = "italian",
     task: str = "transcribe",
@@ -176,7 +176,7 @@ def create_mel_datasets_for_cv(
 
 
 def create_mel_train_eval_datasets(
-    csv_path: str = "/home/siyuan/Opensmile_project/experiment/audio_mel/data-mel/mel_dataset.csv",
+    csv_path: str = "audio_mel/data-mel/mel_dataset.csv",
     model_name: str = "openai/whisper-large-v3-turbo",
     language: str = "italian",
     task: str = "transcribe",

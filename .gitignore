@@ -13,6 +13,7 @@ audio_mel/data-mel
 *.pkl
 *pyc
 *.txt
+draft
 experiment/logs/
 whisper_finetune/outputs/
 whisper_finetune/lightning_logs/

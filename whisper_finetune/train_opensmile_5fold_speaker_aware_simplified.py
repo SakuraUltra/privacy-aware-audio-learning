@@ -120,12 +120,12 @@ class SpeakerAwareCrossValidationTrainer:
         self.cv_results = []
         
         # Paths
-        self.speaker_folds_path = "/home/siyuan/Opensmile_project/data/speaker_folds.csv"
-        self.dataset_path = "/home/siyuan/Opensmile_project/whisper_finetune/train_dataset_dim32.csv"
-        self.feature_dir = "/home/siyuan/Opensmile_project/data/extracted_features_train"
+        self.speaker_folds_path = "../data/speaker_folds.csv"
+        self.dataset_path = "../whisper_finetune/train_dataset_dim32.csv"
+        self.feature_dir = "../data/extracted_features_train"
         
         # Output directories
-        self.output_dir = "/home/siyuan/Opensmile_project/whisper_finetune/outputs"
+        self.output_dir = "../whisper_finetune/outputs"
         self.checkpoint_dir = os.path.join(self.output_dir, "checkpoints_speaker_aware")
         self.log_dir = os.path.join(self.output_dir, "logs_speaker_aware")
         

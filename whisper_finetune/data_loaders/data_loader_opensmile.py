@@ -32,7 +32,7 @@ class OpenSMILEWhisperDataset(Dataset):
     def __init__(self, df, tokenizer, feature_dir=None, shared_scaler=None):
         self.df = df
         self.tokenizer = tokenizer
-        self.feature_dir = feature_dir or "/home/siyuan/Opensmile_project/data/extracted_features_train"
+        self.feature_dir = feature_dir or "../data/extracted_features_train"
         
         # 使用共享的scaler，避免重复计算
         if shared_scaler is not None:
@@ -131,8 +131,8 @@ class OpenSMILEWhisperDataModule(pl.LightningDataModule):
         super().__init__()
         self.df = df
         self.batch_size = batch_size
-        self.train_feature_dir = train_feature_dir or "/home/siyuan/Opensmile_project/data/extracted_features_train"
-        self.val_feature_dir = val_feature_dir or "/home/siyuan/Opensmile_project/data/extracted_features_val"
+        self.train_feature_dir = train_feature_dir or "../data/extracted_features_train"
+        self.val_feature_dir = val_feature_dir or "../data/extracted_features_val"
         
         # 只需要tokenizer，不需要完整的processor
         self.tokenizer = WhisperTokenizer.from_pretrained(
