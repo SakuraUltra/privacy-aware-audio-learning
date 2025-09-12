@@ -76,7 +76,7 @@ class AudioMelDataset(Dataset):
         
         # 如果没有配置，使用原来的硬编码逻辑作为fallback
         if feature_path.startswith('data/mel_features/'):
-            return feature_path.replace('data/mel_features/', 'audio_mel/data-bak/mel_features/', 1)
+            return feature_path.replace('data/mel_features/', 'audio_mel/data-mel/mel_features/', 1)
         
         return feature_path
 

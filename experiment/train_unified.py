@@ -10,8 +10,7 @@ from pathlib import Path
 from configs.config_factory import ConfigFactory
 from trainers.base_trainer import BaseExperimentTrainer
 from trainers.vib_trainer import VIBTrainer
-from trainers.whisper_lora_trainer import WhisperLoRATrainer
-from configs.whisper_lora_config import WhisperLoRAConfig
+from trainers.aia_trainer import AIATrainer
 from utils.logging import setup_experiment_logging
 from utils.whisper_mel_adapter import create_mel_datasets_for_cv, create_mel_train_eval_datasets
 
@@ -24,8 +23,8 @@ def parse_arguments():
                         choices=['opensmile', 'mel'],
                         help="Feature type: 'opensmile' or 'mel'")
     parser.add_argument('--mode', type=str, default='normal',
-                        choices=['normal', 'dp', 'vib', 'whisper_lora'],
-                        help="Training mode: 'normal', 'dp' (Differential Privacy), 'vib' (Variational Information Bottleneck), or 'whisper_lora' (Whisper LoRA Fine-tuning)")
+                        choices=['normal', 'dp', 'vib', 'aia'],
+                        help="Training mode: 'normal', 'dp' (Differential Privacy), 'vib' (Variational Information Bottleneck), or 'aia' (Attribute Inference Attack)")
 
     # VIB相关参数
     parser.add_argument('--z_dim', type=int, default=64, help="VIB latent dimension")
@@ -36,6 +35,32 @@ def parse_arguments():
     parser.add_argument('--epsilon', type=float, default=8.0,
                         help="Epsilon value for Differential Privacy (only used in DP mode)")
 
+    # AIA相关参数
+    parser.add_argument('--checkpoint_paths', type=str, default=None,
+                        help="Comma-separated list of 5 checkpoint paths for AIA attacks")
+    parser.add_argument('--attack_type', type=str, default='gender',
+                        choices=['gender', 'age_level', 'education'],
+                        help="AIA attack type: 'gender', 'age_level', or 'education'")
+    parser.add_argument('--target_model_mode', type=str, default='normal',
+                        choices=['normal', 'dp', 'vib'],
+                        help="Target model training mode for AIA attacks")
+    parser.add_argument('--attack_model_type', type=str, default='mlp',
+                        choices=['mlp', 'transformer'],
+                        help="Attack model architecture: 'mlp' or 'transformer'")
+    parser.add_argument('--input_mode', type=str, default='features_only',
+                        choices=['features_only', 'representations_only', 'concatenation'],
+                        help="Input data mode: 'features_only', 'representations_only', or 'concatenation'")
+    
+    # Transformer攻击模型参数
+    parser.add_argument('--transformer_d_model', type=int, default=128,
+                        help="Transformer d_model for AIA attacks")
+    parser.add_argument('--transformer_nhead', type=int, default=4,
+                        help="Transformer number of heads for AIA attacks")
+    parser.add_argument('--transformer_num_layers', type=int, default=2,
+                        help="Transformer number of layers for AIA attacks")
+    parser.add_argument('--transformer_dim_feedforward', type=int, default=256,
+                        help="Transformer feedforward dimension for AIA attacks")
+
     # 训练参数
     parser.add_argument('--epochs', type=int, default=10,
                         help="Number of training epochs")
@@ -44,15 +69,35 @@ def parse_arguments():
     parser.add_argument('--lr', type=float, default=1e-4,
                         help="Learning rate")
 
-    parser.add_argument('--use_cv', action='store_true',
-                        help='Use 5-fold cross validation for whisper_lora mode')
-
     return parser.parse_args()
+
+
+def validate_aia_arguments(args):
+    """验证AIA相关参数"""
+    if args.mode == 'aia':
+        if args.checkpoint_paths is None:
+            raise ValueError("--checkpoint_paths is required for AIA mode")
+        
+        # 解析checkpoint路径
+        checkpoint_paths = [path.strip() for path in args.checkpoint_paths.split(',')]
+        if len(checkpoint_paths) != 5:
+            raise ValueError("Must provide exactly 5 checkpoint paths for AIA attacks")
+        
+        # 验证checkpoint文件是否存在
+        for path in checkpoint_paths:
+            if not Path(path).exists():
+                raise FileNotFoundError(f"Checkpoint file not found: {path}")
+        
+        return checkpoint_paths
+    return None
 
 
 def main():
     """主函数"""
     args = parse_arguments()
+    
+    # 验证AIA参数
+    checkpoint_paths = validate_aia_arguments(args)
     
     # 设置日志
     log_file = setup_experiment_logging(args.feature_type, args.mode, args.epsilon if args.mode == 'dp' else None)
@@ -63,7 +108,6 @@ def main():
         print(f"Feature Type: {args.feature_type.upper()}")
         print(f"Training Mode: {args.mode.upper()}")
 
-
         if args.mode == 'dp':
             print(f"DP Epsilon: {args.epsilon}")
             print("=" * 60)
@@ -72,18 +116,34 @@ def main():
             print(f"VIB Beta: {args.beta}")
             print(f"VIB MC Samples: {args.mc_samples}")
             print("=" * 60)
-        elif args.mode == 'whisper_lora':
-            print("Running Whisper LoRA Fine-tuning mode.")
+        elif args.mode == 'aia':
+            print(f"AIA Attack Type: {args.attack_type.upper()}")
+            print(f"Target Model Mode: {args.target_model_mode.upper()}")
+            print(f"Attack Model Type: {args.attack_model_type.upper()}")
+            print(f"Number of Checkpoints: {len(checkpoint_paths)}")
             print("=" * 60)
         else:
             print("Running in Normal mode.")
             print("=" * 60)
 
-        if args.mode == 'whisper_lora':
-            # Whisper LoRA 使用专门的配置
-            config = WhisperLoRAConfig()
+        # 使用ConfigFactory创建配置
+        if args.mode == 'aia':
+            # AIA模式需要额外的参数
+            config = ConfigFactory.create_config(
+                feature_type=args.feature_type,
+                mode=args.mode,
+                attack_type=args.attack_type,
+                checkpoint_paths=checkpoint_paths,
+                target_model_mode=args.target_model_mode,
+                attack_model_type=args.attack_model_type,
+                input_mode=args.input_mode,
+                transformer_d_model=args.transformer_d_model,
+                transformer_nhead=args.transformer_nhead,
+                transformer_num_layers=args.transformer_num_layers,
+                transformer_dim_feedforward=args.transformer_dim_feedforward,
+            )
         else:
-            # 其他模式使用 ConfigFactory
+            # 其他模式使用标准参数
             config = ConfigFactory.create_config(
                 feature_type=args.feature_type,
                 mode=args.mode,
@@ -94,8 +154,8 @@ def main():
             )
         
         # 更新配置参数
-        if args.mode == 'whisper_lora':
-            # Whisper LoRA 配置更新
+        if args.mode != 'aia':
+            # 非AIA模式配置更新
             config.general.update({
                 'epochs': args.epochs,
             })
@@ -105,71 +165,19 @@ def main():
             config.training.update({
                 'lr': args.lr,
             })
-        else:
-            # 其他模式配置更新
-            config.general.update({
-                'epochs': args.epochs,
-            })
-            config.data.update({
-                'batch_size': args.batch_size,
-            })
-            config.training.update({
-                'lr': args.lr,
-            })
+        # AIA模式的配置参数已经在创建时设置
         
         # 根据模式选择合适的训练器
         if args.mode == 'vib':
             print("Using VIBTrainer for VIB mode...")
             trainer = VIBTrainer(config)
             avg_metrics = trainer.run_cross_validation()
-        elif args.mode == 'whisper_lora':
-            print("Using WhisperLoRATrainer for Whisper LoRA mode...")
-
-            if args.use_cv:
-                print("Preparing complete MEL dataset for 5-Fold Cross Validation...")
-
-                # 准备完整数据集用于交叉验证
-                processor, full_dataset = create_mel_datasets_for_cv(
-                    model_name=config.model['base_model'],
-                    language=config.data.get('language', 'italian'),
-                    task=config.data.get('task', 'transcribe'),
-                    max_samples=500 if args.epochs == 1 else None  # 测试模式使用500个样本确保多个说话人
-                )
-
-                # 将完整数据集注入到配置中
-                config.data['processor'] = processor
-                config.data['full_dataset'] = full_dataset
-
-                print(f"✅ Complete dataset prepared: {len(full_dataset)} samples")
-
-                # 创建训练器并运行交叉验证
-                trainer = WhisperLoRATrainer(config)
-                avg_metrics = trainer.run_cross_validation(n_folds=5)
-
-            else:
-                print("Preparing MEL datasets for single training...")
-
-                # 准备训练和验证数据集
-                processor, train_dataset, eval_dataset = create_mel_train_eval_datasets(
-                    model_name=config.model['base_model'],
-                    language=config.data.get('language', 'italian'),
-                    task=config.data.get('task', 'transcribe'),
-                    max_samples=500 if args.epochs == 1 else None  # 测试模式使用500个样本确保多个说话人
-                )
-
-                # 将数据集注入到配置中
-                config.data['processor'] = processor
-                config.data['train_dataset'] = train_dataset
-                config.data['eval_dataset'] = eval_dataset
-
-                print(f"✅ Datasets prepared: {len(train_dataset)} train, {len(eval_dataset)} eval samples")
-
-                # 创建训练器并进行单次训练
-                trainer = WhisperLoRATrainer(config)
-                trainer.train()
-                avg_metrics = None
+        elif args.mode == 'aia':
+            print("Using AIATrainer for AIA mode...")
+            trainer = AIATrainer(config)
+            avg_metrics = trainer.run_attack_experiment()
         else:
-            print("Using BaseExperimentTrainer for Normal/DP mode...")
+            print("Using BaseExperimentTrainer for Normal/DP modes...")
             trainer = BaseExperimentTrainer(config)
             avg_metrics = trainer.run_cross_validation()
         

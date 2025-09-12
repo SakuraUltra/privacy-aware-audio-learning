@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 This is a unified machine learning framework for audio classification experiments supporting multiple training modes and feature types. The project focuses on differential privacy-based inference from biological and vocal features with support for:
 
-- **Active Training Modes**: Normal, Differential Privacy (DP), Variational Information Bottleneck (VIB)
+- **Active Training Modes**: Normal, Differential Privacy (DP), Variational Information Bottleneck (VIB), Attribute Inference Attack (AIA)
 - **Feature Types**: OpenSMILE traditional audio features, MEL spectrograms from Whisper
 
 **IMPORTANT**: Ignore Adversarial (Adv) and LoRA-related code as these training modes are deprecated and no longer planned for use in this project.
@@ -16,12 +16,21 @@ This is a unified machine learning framework for audio classification experiment
 ### Primary Training Command
 ```bash
 # Main unified training script
-python train_unified.py --feature_type <opensmile|mel> --mode <normal|dp|vib> [options]
+python train_unified.py --feature_type <opensmile|mel> --mode <normal|dp|vib|aia> [options]
 
 # Examples:
 python train_unified.py --feature_type opensmile --mode normal
 python train_unified.py --feature_type mel --mode dp --epsilon 8.0
 python train_unified.py --feature_type mel --mode vib --z_dim 128 --beta 5e-3
+
+# AIA (Attribute Inference Attack) examples:
+python train_unified.py --feature_type opensmile --mode aia \
+    --checkpoint_paths checkpoints/normal_fold_0.pth,checkpoints/normal_fold_1.pth,... \
+    --attack_type gender --target_model_mode normal
+    
+python train_unified.py --feature_type mel --mode aia \
+    --checkpoint_paths checkpoints/vib_fold_0.pth,checkpoints/vib_fold_1.pth,... \
+    --attack_type age_level --target_model_mode vib --attack_model_type transformer
 ```
 
 ### Environment Setup
@@ -54,22 +63,26 @@ python data/label-check.py
 2. **Training Framework** (`trainers/`):
    - `BaseExperimentTrainer`: Handles standard cross-validation training
    - `VIBTrainer`: Specialized trainer for Variational Information Bottleneck
+   - `AIATrainer`: Specialized trainer for Attribute Inference Attacks
    - `CoreTrainer`: Low-level epoch training and evaluation logic
 
 3. **Model Architecture** (`models/`):
    - `TransformerClassifier`: Main transformer-based classification model
    - `VIBModel`: Variational Information Bottleneck implementation
+   - `AIA Attack Models`: MLP and Transformer-based attribute inference attackers
 
 4. **Data Handling** (`data/`, `audio_mel/`):
    - Unified dataset interfaces for different feature types
    - Cross-validation splits based on speaker folds
    - Feature extraction and normalization utilities
+   - Demographic information extraction from filename patterns
 
 ### Training Modes
 
 - **Normal**: Standard cross-entropy training with transformer classifier
 - **DP (Differential Privacy)**: Uses Opacus library for privacy-preserving training
 - **VIB (Variational Information Bottleneck)**: Information-theoretic regularization approach
+- **AIA (Attribute Inference Attack)**: Privacy evaluation through demographic attribute prediction
 
 ### Data Structure
 
@@ -129,29 +142,65 @@ Ensure both mean and standard deviation are calculated and displayed across all 
 - VIB mode includes KL divergence warmup and Monte Carlo uncertainty estimation
 - MEL features require Whisper model preprocessing pipeline
 
+## Development Task Management
+
+- **Current Status**: AIA (Attribute Inference Attack) implementation completed ✅
+- Refer to `todo.md` for implementation details and progress tracking
+- All Phase 1-3 AIA tasks have been successfully implemented
+- System ready for Phase 4 experimental validation
+
 ## Future Development Plans
 
-### Next Phase: Privacy Information Leakage Analysis
+### Current Phase: AIA (Attribute Inference Attack) - COMPLETED ✅
 
-**Objective**: Detect and analyze privacy information leakage in learned hidden representations by training classifiers to predict demographic attributes.
+**Status**: Implementation completed - all core functionality integrated
 
-#### Phase 1: Data Attribute Extraction
-- **Data Naming Convention**: Extract demographic information from audio file naming patterns
-  - Format example: `29_CF34_3` → Age: 29, Gender: F (Female), Age: 34, Education Level: 3
-  - Parse and extract: Age, Gender (M/F), Education Level from filename patterns
-- **Create Demographic Labels**: Build comprehensive demographic dataset with extracted attributes
+**Objective**: Implement attribute inference attacks to evaluate privacy leakage of demographic information (gender, age, education) in trained model representations and test the effectiveness of differential privacy and VIB approaches.
 
-#### Phase 2: Privacy Leakage Detection
-- **Hidden Representation Analysis**: Extract hidden representations from trained models (Normal, DP, VIB)
-- **Attribute Prediction**: Train separate classifiers to predict:
-  - Age (regression/classification)
-  - Gender (binary classification)  
-  - Education Level (multi-class classification)
-- **Privacy Evaluation**: Measure how well demographic attributes can be inferred from hidden representations
-- **Comparison Across Methods**: Evaluate privacy protection effectiveness of DP and VIB vs Normal training
+#### Successfully Implemented Features:
+- ✅ **Automated Representation Extraction**: Extract hidden representations from trained model checkpoints (5-fold CV)
+- ✅ **Demographic Information Parsing**: Extract age, gender, and education level from filename patterns (`编号_[PC][MF]年龄_教育等级_slice编号.csv`)
+- ✅ **Multiple Attack Types**: Gender prediction, age-level prediction (5 categories), education prediction
+- ✅ **Age Categorization**: Convert continuous ages into 5 statistical levels using quantiles
+- ✅ **Dual Attack Models**: Both MLP and TransformerAttacker architectures for temporal audio features
+- ✅ **Unified Framework Integration**: All attacks accessible through `train_unified.py` with new `--mode aia` option
+- ✅ **Complete Configuration System**: AIAConfig with full parameter management
+- ✅ **Validation Pipeline**: Comprehensive error checking and path validation
+- ✅ **Multiple Input Modes**: Support for features-only, representations-only, and concatenation modes
+- ✅ **Intelligent Caching**: Mode-specific caching system with path structure: `.cache/{input_mode}/{attack_type}/`
+
+#### Usage Examples:
+```bash
+# Gender attack on Normal model with different input modes
+python train_unified.py --mode aia --feature_type opensmile \
+  --checkpoint_paths checkpoints/normal_fold_0.pth,checkpoints/normal_fold_1.pth,... \
+  --attack_type gender --target_model_mode normal --input_mode features_only
+
+# Age level attack using TransformerAttacker with representation-only input
+python train_unified.py --mode aia --feature_type mel \
+  --checkpoint_paths checkpoints/dp_fold_0.pth,checkpoints/dp_fold_1.pth,... \
+  --attack_type age_level --target_model_mode dp --attack_model_type transformer \
+  --input_mode representations_only
+
+# Concatenation mode for enhanced attack performance
+python train_unified.py --mode aia --feature_type mel \
+  --checkpoint_paths checkpoints/vib_fold_0.pth,checkpoints/vib_fold_1.pth,... \
+  --attack_type gender --target_model_mode vib --input_mode concatenation
+```
+
+### Next Phase: Experimental Validation and Analysis
+
+**Objective**: Execute comprehensive AIA experiments and analyze privacy leakage across different training methods.
+
+#### Phase 4: Experimental Execution
+- **Gender Attack Experiments**: Test all model types (Normal, DP, VIB) with both feature types
+- **Age Level Attack Experiments**: Evaluate 5-category age prediction across privacy methods
+- **Education Level Attack Experiments**: Assess education information leakage
+- **Comparative Analysis**: Generate detailed privacy protection effectiveness reports
+- **Results Documentation**: Update examples.md and README.md with experimental findings
 
 #### Implementation Strategy
-- Maintain unified framework using `train_unified.py`
-- Add new training modes for attribute prediction if needed
+- Execute experiments using completed AIA framework through `train_unified.py`
 - Results must follow `mean ± std` reporting format across 5-fold validation
-- Focus on quantifying privacy leakage severity across different training paradigms
+- Focus on quantifying attribute privacy leakage severity across different training paradigms
+- Generate comprehensive privacy evaluation reports

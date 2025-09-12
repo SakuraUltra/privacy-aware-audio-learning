@@ -15,5 +15,6 @@ audio_mel/data-mel
 *.txt
 draft
 experiment/logs/
+experiment/.cache/
 whisper_finetune/outputs/
 whisper_finetune/lightning_logs/
