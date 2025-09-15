@@ -77,10 +77,14 @@ class AIATrainer(BaseExperimentTrainer):
         return hashlib.md5(key_string.encode()).hexdigest()[:12]
     
     def get_cache_path(self) -> str:
-        """获取缓存文件路径 - 按input_mode分组"""
+        """获取缓存文件路径 - Mix模式复用concatenation缓存"""
         input_mode = self.config.aia_params['input_mode']
         attack_type = self.config.aia_params['attack_type']
-        cache_dir = f".cache/{input_mode}/{attack_type}"
+        
+        # Mix模式使用concatenation的缓存（因为需要相同的数据：features + representations）
+        cache_mode = 'concatenation' if input_mode == 'mix' else input_mode
+        
+        cache_dir = f".cache/{cache_mode}/{attack_type}"
         os.makedirs(cache_dir, exist_ok=True)
         cache_key = self.get_cache_key()
         return f"{cache_dir}/representations_{cache_key}.pkl"
@@ -137,9 +141,13 @@ class AIATrainer(BaseExperimentTrainer):
         print("Extracting representations from target models using correct 5-fold CV...")
         
         # 尝试从缓存加载
+        input_mode = self.config.aia_params['input_mode']
         cached_representations = self.load_representations_cache()
         if cached_representations is not None:
-            print("🚀 Using cached representations, skipping extraction!")
+            if input_mode == 'mix':
+                print("🚀 Mix mode: Using concatenation cache (features + representations), will apply mixing during processing!")
+            else:
+                print(f"🚀 Using cached representations for {input_mode} mode, skipping extraction!")
             return cached_representations
         
         print("💾 No valid cache found, extracting representations...")
@@ -346,6 +354,9 @@ class AIATrainer(BaseExperimentTrainer):
             print("🧠 REPRESENTATIONS-ONLY MODE: Using learned representations only")
         elif input_mode == 'concatenation':
             print("🔗 CONCATENATION MODE: Using concatenated features and representations")
+        elif input_mode == 'mix':
+            alpha = self.config.aia_params['mix_alpha']
+            print(f"🎯 MIX MODE: Normalized features * {alpha} + representations * {1-alpha}")
         
         fold_datasets = {}
         
@@ -359,18 +370,37 @@ class AIATrainer(BaseExperimentTrainer):
             test_labels = []
             
             for fold_idx in range(5):
+                print(f"  Processing fold {fold_idx+1} data...")
                 if fold_idx not in representations_dict:
+                    print(f"    Fold {fold_idx+1}: No data found, skipping")
                     continue
                     
                 representations, original_labels, filenames, features = representations_dict[fold_idx]
+                print(f"    Fold {fold_idx+1}: repr={representations.shape}, features={features.shape}, samples={len(filenames)}")
                 
                 # 检查数据是否可用
                 has_representations = representations.size > 0
                 has_features = features.size > 0
                 
+                # 检查并修复VIB模式的shape不匹配问题
+                if has_representations and has_features:
+                    if len(representations) != len(features):
+                        print(f"    Warning: Shape mismatch - repr: {representations.shape}, features: {features.shape}")
+                        # 如果representations数量是features的2倍，可能是VIB的采样问题，取前一半
+                        if len(representations) == 2 * len(features):
+                            print(f"    Fixing VIB sampling issue: taking first half of representations")
+                            representations = representations[:len(features)]
+                            # 同时需要调整filenames以保持一致
+                            if len(filenames) == 2 * len(features):
+                                filenames = filenames[:len(features)]
+                        else:
+                            print(f"    Skipping fold {fold_idx+1} due to unresolvable shape mismatch")
+                            continue
+                
                 # 直接从speaker_id解析属性标签
                 fold_attr_labels = []
                 valid_indices = []
+                print(f"    Parsing {len(filenames)} speaker IDs for {attribute_type}...")
                 
                 for i, speaker_id in enumerate(filenames):  # 这里实际上是speaker_ids
                     try:
@@ -436,19 +466,134 @@ class AIATrainer(BaseExperimentTrainer):
                         
                 elif input_mode == 'concatenation':
                     # 拼接features和representations
+                    print(f"    Starting concatenation mode for fold {fold_idx+1}...")
                     if valid_features is not None and valid_representations is not None and has_features and has_representations:
+                        print(f"    Features shape: {valid_features.shape}, Repr shape: {valid_representations.shape}")
+                        
                         if self.config.aia_params['attack_model_type'] == 'mlp':
-                            # MLP: mean pool features then concatenate with representations
+                            # MLP: mean pool features then concatenate with pooled representations
+                            print(f"    Computing mean pooling for features...")
                             pooled_features = np.mean(valid_features, axis=1)  # (N, 80)
-                            valid_inputs = np.concatenate([pooled_features, valid_representations], axis=1)  # (N, 160)
+                            print(f"    Pooled features shape: {pooled_features.shape}")
+                            
+                            # Pool representations if they have time dimension
+                            if len(valid_representations.shape) == 3:
+                                print(f"    Computing mean pooling for representations...")
+                                pooled_representations = np.mean(valid_representations, axis=1)  # (N, 80)
+                                print(f"    Pooled representations shape: {pooled_representations.shape}")
+                            else:
+                                pooled_representations = valid_representations  # Already pooled
+                            
+                            print(f"    Concatenating pooled features with representations...")
+                            valid_inputs = np.concatenate([pooled_features, pooled_representations], axis=1)  # (N, 160)
+                            print(f"    Concatenated shape: {valid_inputs.shape}")
                         else:
                             # Transformer: concatenate along feature dimension for each time step
-                            # representations需要broadcast到每个时间步
-                            repr_broadcast = np.expand_dims(valid_representations, axis=1)  # (N, 1, 80)
-                            repr_broadcast = np.repeat(repr_broadcast, valid_features.shape[1], axis=1)  # (N, 1000, 80)
-                            valid_inputs = np.concatenate([valid_features, repr_broadcast], axis=2)  # (N, 1000, 160)
+                            print(f"    Broadcasting representations for transformer...")
+                            
+                            # If representations have time dimension, use as is; otherwise broadcast
+                            if len(valid_representations.shape) == 3:
+                                # Representations already have time dimension (N, seq_len, repr_dim)
+                                if valid_representations.shape[1] == valid_features.shape[1]:
+                                    # Same sequence length, use directly
+                                    print(f"    Using time-sequence representations directly...")
+                                    valid_inputs = np.concatenate([valid_features, valid_representations], axis=2)  # (N, 1000, 160)
+                                else:
+                                    # Different sequence lengths, use pooled representations and broadcast
+                                    print(f"    Pooling and broadcasting representations...")
+                                    pooled_repr = np.mean(valid_representations, axis=1)  # (N, 80)
+                                    repr_broadcast = np.expand_dims(pooled_repr, axis=1)  # (N, 1, 80)
+                                    repr_broadcast = np.repeat(repr_broadcast, valid_features.shape[1], axis=1)  # (N, 1000, 80)
+                                    valid_inputs = np.concatenate([valid_features, repr_broadcast], axis=2)  # (N, 1000, 160)
+                            else:
+                                # Representations are pooled (N, repr_dim), need to broadcast
+                                print(f"    Broadcasting pooled representations...")
+                                repr_broadcast = np.expand_dims(valid_representations, axis=1)  # (N, 1, 80)
+                                repr_broadcast = np.repeat(repr_broadcast, valid_features.shape[1], axis=1)  # (N, 1000, 80)
+                                valid_inputs = np.concatenate([valid_features, repr_broadcast], axis=2)  # (N, 1000, 160)
+                            
+                            print(f"    Final concatenated shape: {valid_inputs.shape}")
                     else:
                         print(f"Warning: Missing data for concatenation in fold {fold_idx+1}")
+                        continue
+                        
+                elif input_mode == 'mix':
+                    # Mix模式：归一化后的features和representations加权混合
+                    print(f"    Starting mix mode for fold {fold_idx+1}...")
+                    if valid_features is not None and valid_representations is not None and has_features and has_representations:
+                        alpha = self.config.aia_params['mix_alpha']
+                        print(f"    Mix alpha: {alpha}")
+                        print(f"    Features shape: {valid_features.shape}, Repr shape: {valid_representations.shape}")
+                        
+                        if self.config.aia_params['attack_model_type'] == 'mlp':
+                            # MLP: 先mean pool features，然后归一化并混合
+                            print(f"    Computing mean pooling for MLP...")
+                            pooled_features = np.mean(valid_features, axis=1)  # (N, 80)
+                            print(f"    Pooled features shape: {pooled_features.shape}")
+                            
+                            # Pool representations if they have time dimension
+                            if len(valid_representations.shape) == 3:
+                                print(f"    Computing mean pooling for representations...")
+                                pooled_representations = np.mean(valid_representations, axis=1)  # (N, 80)
+                                print(f"    Pooled representations shape: {pooled_representations.shape}")
+                            else:
+                                pooled_representations = valid_representations  # Already pooled
+                            
+                            print(f"    Computing L2 normalization...")
+                            # L2归一化
+                            pooled_features_norm = pooled_features / (np.linalg.norm(pooled_features, axis=1, keepdims=True) + 1e-8)
+                            representations_norm = pooled_representations / (np.linalg.norm(pooled_representations, axis=1, keepdims=True) + 1e-8)
+                            print(f"    Normalized shapes - features: {pooled_features_norm.shape}, repr: {representations_norm.shape}")
+                            
+                            print(f"    Computing weighted mix...")
+                            # 加权混合
+                            valid_inputs = alpha * pooled_features_norm + (1 - alpha) * representations_norm  # (N, 80)
+                            print(f"    Mixed shape: {valid_inputs.shape}")
+                        else:
+                            # Transformer: 对每个时间步进行归一化和混合
+                            print(f"    Processing transformer mix mode...")
+                            
+                            # Handle different representation shapes
+                            if len(valid_representations.shape) == 3:
+                                # Representations have time dimension
+                                if valid_representations.shape[1] == valid_features.shape[1]:
+                                    # Same sequence length, use directly
+                                    print(f"    Using time-sequence representations for mix...")
+                                    # L2归一化（沿着特征维度）
+                                    features_norm = valid_features / (np.linalg.norm(valid_features, axis=2, keepdims=True) + 1e-8)  # (N, 1000, 80)
+                                    repr_norm = valid_representations / (np.linalg.norm(valid_representations, axis=2, keepdims=True) + 1e-8)  # (N, 1000, 80)
+                                    valid_inputs = alpha * features_norm + (1 - alpha) * repr_norm  # (N, 1000, 80)
+                                else:
+                                    # Different sequence lengths, pool and broadcast
+                                    print(f"    Pooling representations for mix...")
+                                    pooled_repr = np.mean(valid_representations, axis=1)  # (N, 80)
+                                    repr_broadcast = np.expand_dims(pooled_repr, axis=1)  # (N, 1, 80)
+                                    repr_broadcast = np.repeat(repr_broadcast, valid_features.shape[1], axis=1)  # (N, 1000, 80)
+                                    
+                                    # L2归一化
+                                    features_norm = valid_features / (np.linalg.norm(valid_features, axis=2, keepdims=True) + 1e-8)
+                                    repr_broadcast_norm = repr_broadcast / (np.linalg.norm(repr_broadcast, axis=2, keepdims=True) + 1e-8)
+                                    valid_inputs = alpha * features_norm + (1 - alpha) * repr_broadcast_norm  # (N, 1000, 80)
+                            else:
+                                # Representations are pooled, need to broadcast
+                                print(f"    Broadcasting pooled representations for transformer mix...")
+                                repr_broadcast = np.expand_dims(valid_representations, axis=1)  # (N, 1, 80)
+                                repr_broadcast = np.repeat(repr_broadcast, valid_features.shape[1], axis=1)  # (N, 1000, 80)
+                                print(f"    Broadcasted repr shape: {repr_broadcast.shape}")
+                                
+                                print(f"    Computing L2 normalization for transformer...")
+                                # L2归一化（沿着特征维度）
+                                features_norm = valid_features / (np.linalg.norm(valid_features, axis=2, keepdims=True) + 1e-8)  # (N, 1000, 80)
+                                repr_broadcast_norm = repr_broadcast / (np.linalg.norm(repr_broadcast, axis=2, keepdims=True) + 1e-8)  # (N, 1000, 80)
+                                print(f"    Normalized shapes - features: {features_norm.shape}, repr: {repr_broadcast_norm.shape}")
+                                
+                                print(f"    Computing weighted mix...")
+                                # 加权混合
+                                valid_inputs = alpha * features_norm + (1 - alpha) * repr_broadcast_norm  # (N, 1000, 80)
+                            
+                            print(f"    Mixed shape: {valid_inputs.shape}")
+                    else:
+                        print(f"Warning: Missing data for mix mode in fold {fold_idx+1}")
                         continue
                 else:
                     raise ValueError(f"Unknown input mode: {input_mode}")
@@ -456,6 +601,10 @@ class AIATrainer(BaseExperimentTrainer):
                 # 统计当前fold的属性分布
                 unique_labels, counts = np.unique(valid_attr_labels, return_counts=True)
                 print(f"  Fold {fold_idx+1} {attribute_type} distribution: {dict(zip(unique_labels, counts))}")
+                
+                print(f"    Processing input mode '{input_mode}' for fold {fold_idx+1}...")
+                print(f"    Input shape: {valid_inputs.shape if valid_inputs is not None else 'None'}")
+                print(f"    Label shape: {valid_attr_labels.shape}")
                 
                 # 分配到训练集或测试集
                 if fold_idx == test_fold:
@@ -470,13 +619,20 @@ class AIATrainer(BaseExperimentTrainer):
                     print(f"  Train fold {fold_idx+1}: {len(valid_inputs)} samples ({input_mode})")
             
             # 合并训练数据和测试数据
+            print(f"  Starting data concatenation...")
+            print(f"  Train inputs count: {len(train_inputs)}, Test inputs count: {len(test_inputs)}")
+            
             if train_inputs and test_inputs:
+                print(f"  Concatenating train labels...")
                 train_y = np.concatenate(train_labels)
+                print(f"  Concatenating test labels...")
                 test_y = np.concatenate(test_labels)
+                print(f"  Labels concatenated - Train: {train_y.shape}, Test: {test_y.shape}")
                 
                 # 处理输入数据
                 if train_inputs:
                     try:
+                        print(f"  Stacking train inputs...")
                         train_X = np.vstack(train_inputs)
                         print(f"  Train inputs: {train_X.shape}")
                     except Exception as e:
@@ -485,6 +641,7 @@ class AIATrainer(BaseExperimentTrainer):
                         
                 if test_inputs:
                     try:
+                        print(f"  Stacking test inputs...")
                         test_X = np.vstack(test_inputs)
                         print(f"  Test inputs: {test_X.shape}")
                     except Exception as e:
@@ -495,10 +652,16 @@ class AIATrainer(BaseExperimentTrainer):
                 print(f"  {input_mode.capitalize()}: Input dim = {train_X.shape[-1]}")
                 
                 # 创建数据集
+                print(f"  Creating MIA datasets...")
+                print(f"  Train data shape: {train_X.shape}, labels: {train_y.shape}")
+                print(f"  Test data shape: {test_X.shape}, labels: {test_y.shape}")
+                
                 train_dataset = MIADataset(train_X, train_y)
                 test_dataset = MIADataset(test_X, test_y)
+                print(f"  Datasets created successfully")
                 
                 fold_datasets[test_fold] = (train_dataset, test_dataset)
+                print(f"  Fold {test_fold+1} dataset saved to fold_datasets")
             else:
                 print(f"Warning: No data available for fold {test_fold+1}")
         
@@ -583,18 +746,20 @@ class AIATrainer(BaseExperimentTrainer):
         if hasattr(train_dataset, 'representations') and train_dataset.representations is not None:
             # 在features-only模式下，features数据存储在representations字段中
             sample_input = train_dataset.representations[0]
+            input_mode = self.config.aia_params['input_mode']
+            
             if sample_input.dim() == 2:  # (seq_len, feature_dim)
                 if self.config.aia_params['attack_model_type'] == 'transformer':
                     # Transformer模型：使用完整时序特征
                     feature_dim = sample_input.shape[-1]
-                    print(f"Features-only mode: Using {sample_input.shape} time-series features for Transformer")
+                    print(f"{input_mode.capitalize()} mode: Using {sample_input.shape} time-series features for Transformer")
                 else:
                     # MLP模型：需要mean pooling
                     feature_dim = sample_input.shape[-1]  
-                    print(f"Features-only mode: Using {sample_input.shape} time-series features (will be mean-pooled for MLP)")
+                    print(f"{input_mode.capitalize()} mode: Using {sample_input.shape} time-series features (will be mean-pooled for MLP)")
             elif sample_input.dim() == 1:  # (feature_dim,)
                 feature_dim = sample_input.shape[0]
-                print(f"Features-only mode: Using {feature_dim}D flattened features")
+                print(f"{input_mode.capitalize()} mode: Using {feature_dim}D flattened features")
             
         # 检查是否真的有features数据
         has_features = feature_dim > 0

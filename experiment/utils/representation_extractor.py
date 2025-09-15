@@ -178,11 +178,19 @@ class RepresentationExtractor:
                     
                     # 直接获取pooled_output，避免时序复杂性
                     if model_mode == 'vib':
+                        # VIB模型返回 (logits, pooled, vib_out)
                         outputs = model(features)
-                        if isinstance(outputs, tuple):
-                            logits, additional_outputs = outputs
+                        if isinstance(outputs, tuple) and len(outputs) >= 2:
+                            logits, pooled_output = outputs[0], outputs[1]
+                            # 使用pooled_output作为representations
+                            batch_representations = pooled_output.detach().cpu()
+                            print(f"    VIB batch - features: {features.shape}, pooled: {pooled_output.shape}, labels: {len(batch_labels)}")
+                            representations.append(batch_representations.numpy())
+                            labels.extend(batch_labels.cpu().numpy() if torch.is_tensor(batch_labels) else batch_labels)
+                            filenames.extend(batch_filenames)
                         else:
-                            logits = outputs
+                            print(f"Warning: Unexpected VIB model output format: {type(outputs)}")
+                            continue
                     else:
                         # 对于TransformerClassifier，根据攻击模型类型选择特征
                         if hasattr(model, 'encoder'):

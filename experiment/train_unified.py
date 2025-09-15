@@ -48,8 +48,10 @@ def parse_arguments():
                         choices=['mlp', 'transformer'],
                         help="Attack model architecture: 'mlp' or 'transformer'")
     parser.add_argument('--input_mode', type=str, default='features_only',
-                        choices=['features_only', 'representations_only', 'concatenation'],
-                        help="Input data mode: 'features_only', 'representations_only', or 'concatenation'")
+                        choices=['features_only', 'representations_only', 'concatenation', 'mix'],
+                        help="Input data mode: 'features_only', 'representations_only', 'concatenation', or 'mix'")
+    parser.add_argument('--mix_alpha', type=float, default=0.5,
+                        help="Alpha parameter for mix mode: alpha * features + (1-alpha) * representations")
     
     # Transformer攻击模型参数
     parser.add_argument('--transformer_d_model', type=int, default=128,
@@ -137,6 +139,7 @@ def main():
                 target_model_mode=args.target_model_mode,
                 attack_model_type=args.attack_model_type,
                 input_mode=args.input_mode,
+                mix_alpha=args.mix_alpha,
                 transformer_d_model=args.transformer_d_model,
                 transformer_nhead=args.transformer_nhead,
                 transformer_num_layers=args.transformer_num_layers,

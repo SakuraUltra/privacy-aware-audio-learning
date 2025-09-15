@@ -45,16 +45,19 @@ class AIAConfig(BaseConfig):
             # 人口统计信息
             'demographic_labels_path': 'data/demographic_labels.csv',
             
-            # 输入数据模式：'features_only', 'representations_only', 'concatenation'
+            # 输入数据模式：'features_only', 'representations_only', 'concatenation', 'mix'
             'input_mode': 'features_only',
+            
+            # Mix模式参数：alpha * normalized_features + (1-alpha) * normalized_representations
+            'mix_alpha': 0.5,
         }
         
         # 覆盖基类的一些默认配置
         self.experiment_mode = 'aia'
         self.training['lr'] = 1e-3  # AIA攻击模型学习率稍高
         self.training['weight_decay'] = 1e-3  # 增加权重衰减
-        self.training['total_steps'] = 1000  # 总训练步数
-        self.training['eval_every_steps'] = 200  # 每100步评估一次
+        self.training['total_steps'] = 500  # 总训练步数
+        self.training['eval_every_steps'] = 100  # 每100步评估一次
         self.data['batch_size'] = 32  # AIA训练批量可以更大
         self.general['epochs'] = 5   # 保留epochs配置用于兼容
     
@@ -110,6 +113,9 @@ class AIAConfig(BaseConfig):
             return repr_dim
         elif input_mode == 'concatenation':
             return feature_dim + repr_dim
+        elif input_mode == 'mix':
+            # Mix模式：归一化后的特征和表征具有相同维度
+            return max(feature_dim, repr_dim)  # 取两者中的最大值作为混合后的维度
         else:
             raise ValueError(f"Unknown input mode: {input_mode}")
     
@@ -162,7 +168,7 @@ class AIAConfig(BaseConfig):
     
     def set_input_mode(self, mode: str):
         """设置输入数据模式"""
-        valid_modes = ['features_only', 'representations_only', 'concatenation']
+        valid_modes = ['features_only', 'representations_only', 'concatenation', 'mix']
         if mode not in valid_modes:
             raise ValueError(f"Invalid input mode: {mode}. Must be one of {valid_modes}")
         self.aia_params['input_mode'] = mode
