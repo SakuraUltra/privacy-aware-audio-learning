@@ -11,6 +11,7 @@ from configs.config_factory import ConfigFactory
 from trainers.base_trainer import BaseExperimentTrainer
 from trainers.vib_trainer import VIBTrainer
 from trainers.aia_trainer import AIATrainer
+from trainers.mine_privacy_trainer import MINEPrivacyTrainer
 from utils.logging import setup_experiment_logging
 from utils.whisper_mel_adapter import create_mel_datasets_for_cv, create_mel_train_eval_datasets
 
@@ -23,8 +24,8 @@ def parse_arguments():
                         choices=['opensmile', 'mel'],
                         help="Feature type: 'opensmile' or 'mel'")
     parser.add_argument('--mode', type=str, default='normal',
-                        choices=['normal', 'dp', 'vib', 'aia'],
-                        help="Training mode: 'normal', 'dp' (Differential Privacy), 'vib' (Variational Information Bottleneck), or 'aia' (Attribute Inference Attack)")
+                        choices=['normal', 'dp', 'vib', 'aia', 'mine'],
+                        help="Training mode: 'normal', 'dp' (Differential Privacy), 'vib' (Variational Information Bottleneck), 'aia' (Attribute Inference Attack), or 'mine' (MINE Privacy)")
 
     # VIB相关参数
     parser.add_argument('--z_dim', type=int, default=64, help="VIB latent dimension")
@@ -42,7 +43,7 @@ def parse_arguments():
                         choices=['gender', 'age_level', 'education'],
                         help="AIA attack type: 'gender', 'age_level', or 'education'")
     parser.add_argument('--target_model_mode', type=str, default='normal',
-                        choices=['normal', 'dp', 'vib'],
+                        choices=['normal', 'dp', 'vib', 'mine'],
                         help="Target model training mode for AIA attacks")
     parser.add_argument('--attack_model_type', type=str, default='mlp',
                         choices=['mlp', 'transformer'],
@@ -62,6 +63,28 @@ def parse_arguments():
                         help="Transformer number of layers for AIA attacks")
     parser.add_argument('--transformer_dim_feedforward', type=int, default=256,
                         help="Transformer feedforward dimension for AIA attacks")
+
+    # MINE相关参数
+    parser.add_argument('--mine_model_type', type=str, default='timeaware',
+                        choices=['timeaware', 'standard'],
+                        help="MINE model type: 'timeaware' or 'standard'")
+    parser.add_argument('--privacy_weight', type=float, default=0.2,
+                        help="Privacy weight gamma for MINE training")
+    parser.add_argument('--mine_lr', type=float, default=1e-4,
+                        help="Learning rate for MINE optimizer")
+    parser.add_argument('--task_type', type=str, default='classification',
+                        choices=['classification', 'regression'],
+                        help="Task type for MINE training")
+    
+    # MINE音频编码器参数（仅对timeaware模式有效）
+    parser.add_argument('--audio_d_model', type=int, default=80,
+                        help="Audio encoder d_model for TimeAware MINE")
+    parser.add_argument('--audio_nhead', type=int, default=8,
+                        help="Audio encoder number of heads for TimeAware MINE")
+    parser.add_argument('--audio_num_layers', type=int, default=4,
+                        help="Audio encoder number of layers for TimeAware MINE")
+    parser.add_argument('--target_dim', type=int, default=768,
+                        help="Audio encoder target dimension for TimeAware MINE")
 
     # 训练参数
     parser.add_argument('--epochs', type=int, default=10,
@@ -124,6 +147,12 @@ def main():
             print(f"Attack Model Type: {args.attack_model_type.upper()}")
             print(f"Number of Checkpoints: {len(checkpoint_paths)}")
             print("=" * 60)
+        elif args.mode == 'mine':
+            print(f"MINE Model Type: {args.mine_model_type.upper()}")
+            print(f"Privacy Weight: {args.privacy_weight}")
+            print(f"MINE Learning Rate: {args.mine_lr}")
+            print(f"Task Type: {args.task_type.upper()}")
+            print("=" * 60)
         else:
             print("Running in Normal mode.")
             print("=" * 60)
@@ -144,6 +173,21 @@ def main():
                 transformer_nhead=args.transformer_nhead,
                 transformer_num_layers=args.transformer_num_layers,
                 transformer_dim_feedforward=args.transformer_dim_feedforward,
+            )
+        elif args.mode == 'mine':
+            # MINE模式需要额外的参数
+            config = ConfigFactory.create_config(
+                feature_type=args.feature_type,
+                mode=args.mode,
+                mine_model_type=args.mine_model_type,
+                privacy_weight=args.privacy_weight,
+                mine_lr=args.mine_lr,
+                task_type=args.task_type,
+                # 音频编码器参数
+                audio_d_model=args.audio_d_model,
+                audio_nhead=args.audio_nhead,
+                audio_num_layers=args.audio_num_layers,
+                target_dim=args.target_dim,
             )
         else:
             # 其他模式使用标准参数
@@ -179,6 +223,10 @@ def main():
             print("Using AIATrainer for AIA mode...")
             trainer = AIATrainer(config)
             avg_metrics = trainer.run_attack_experiment()
+        elif args.mode == 'mine':
+            print("Using MINEPrivacyTrainer for MINE mode...")
+            trainer = MINEPrivacyTrainer(config)
+            avg_metrics = trainer.run_cross_validation()
         else:
             print("Using BaseExperimentTrainer for Normal/DP modes...")
             trainer = BaseExperimentTrainer(config)

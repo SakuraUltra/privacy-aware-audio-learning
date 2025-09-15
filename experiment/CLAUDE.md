@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 This is a unified machine learning framework for audio classification experiments supporting multiple training modes and feature types. The project focuses on differential privacy-based inference from biological and vocal features with support for:
 
-- **Active Training Modes**: Normal, Differential Privacy (DP), Variational Information Bottleneck (VIB), Attribute Inference Attack (AIA)
+- **Active Training Modes**: Normal, Differential Privacy (DP), Variational Information Bottleneck (VIB), Attribute Inference Attack (AIA), MINE Privacy Protection
 - **Feature Types**: OpenSMILE traditional audio features, MEL spectrograms from Whisper
 
 **IMPORTANT**: Ignore Adversarial (Adv) and LoRA-related code as these training modes are deprecated and no longer planned for use in this project.
@@ -16,7 +16,7 @@ This is a unified machine learning framework for audio classification experiment
 ### Primary Training Command
 ```bash
 # Main unified training script
-python train_unified.py --feature_type <opensmile|mel> --mode <normal|dp|vib|aia> [options]
+python train_unified.py --feature_type <opensmile|mel> --mode <normal|dp|vib|aia|mine> [options]
 
 # Examples:
 python train_unified.py --feature_type opensmile --mode normal
@@ -31,6 +31,18 @@ python train_unified.py --feature_type opensmile --mode aia \
 python train_unified.py --feature_type mel --mode aia \
     --checkpoint_paths checkpoints/vib_fold_0.pth,checkpoints/vib_fold_1.pth,... \
     --attack_type age_level --target_model_mode vib --attack_model_type transformer
+
+# MINE (Mutual Information Neural Estimation) examples:
+python train_unified.py --feature_type opensmile --mode mine \
+    --mine_model_type timeaware --privacy_weight 0.3
+
+python train_unified.py --feature_type mel --mode mine \
+    --mine_model_type standard --privacy_weight 0.2 --enable_dp --epsilon 4.0
+
+# AIA attacks on MINE models:
+python train_unified.py --feature_type mel --mode aia \
+    --checkpoint_paths checkpoints/last_epoch_model_mel_timeaware_fold_1.pth,... \
+    --attack_type gender --target_model_mode mine --attack_model_type transformer
 ```
 
 ### Environment Setup
@@ -58,18 +70,20 @@ python data/label-check.py
 1. **Configuration System** (`configs/`):
    - Factory pattern with `ConfigFactory` for creating mode-specific configurations
    - Base configuration class with specialized configs for each feature type
-   - Supports runtime parameter updates for DP, VIB modes
+   - Supports runtime parameter updates for DP, VIB, and MINE modes
 
 2. **Training Framework** (`trainers/`):
    - `BaseExperimentTrainer`: Handles standard cross-validation training
    - `VIBTrainer`: Specialized trainer for Variational Information Bottleneck
    - `AIATrainer`: Specialized trainer for Attribute Inference Attacks
+   - `MINEPrivacyTrainer`: Specialized trainer for MINE privacy protection
    - `CoreTrainer`: Low-level epoch training and evaluation logic
 
 3. **Model Architecture** (`models/`):
    - `TransformerClassifier`: Main transformer-based classification model
    - `VIBModel`: Variational Information Bottleneck implementation
    - `AIA Attack Models`: MLP and Transformer-based attribute inference attackers
+   - `MINE Models`: TimeAware-MINE and Standard-MINE for mutual information estimation
 
 4. **Data Handling** (`data/`, `audio_mel/`):
    - Unified dataset interfaces for different feature types
@@ -83,6 +97,7 @@ python data/label-check.py
 - **DP (Differential Privacy)**: Uses Opacus library for privacy-preserving training
 - **VIB (Variational Information Bottleneck)**: Information-theoretic regularization approach
 - **AIA (Attribute Inference Attack)**: Privacy evaluation through demographic attribute prediction
+- **MINE (Mutual Information Neural Estimation)**: Privacy protection through mutual information minimization
 
 ### Data Structure
 
@@ -144,14 +159,41 @@ Ensure both mean and standard deviation are calculated and displayed across all 
 
 ## Development Task Management
 
-- **Current Status**: AIA (Attribute Inference Attack) implementation completed ✅
+- **Current Status**: All core training modes implemented and integrated ✅
+- **AIA (Attribute Inference Attack)**: Implementation completed ✅
+- **MINE (Mutual Information Neural Estimation)**: Implementation completed ✅
+- **AIA + MINE Integration**: Successfully integrated with encoder-only checkpoint format ✅
 - Refer to `todo.md` for implementation details and progress tracking
-- All Phase 1-3 AIA tasks have been successfully implemented
-- System ready for Phase 4 experimental validation
+- System ready for comprehensive experimental validation
 
 ## Future Development Plans
 
-### Current Phase: AIA (Attribute Inference Attack) - COMPLETED ✅
+### Recent Update: MINE-AIA Integration - COMPLETED ✅
+
+**Objective**: Successfully integrated MINE privacy protection with AIA evaluation framework.
+
+#### Key Technical Improvements:
+- ✅ **Simplified Checkpoint Format**: Modified MINE trainer to save encoder-only state_dict, eliminating complex nested objects
+- ✅ **Robust Checkpoint Loading**: Updated representation extractor to handle encoder-only MINE checkpoints
+- ✅ **Unified AIA Support**: All privacy methods (Normal, DP, VIB, MINE) now fully compatible with AIA evaluation
+- ✅ **Recursion Issue Resolution**: Solved PyTorch 2.6 compatibility issues with complex checkpoint objects
+
+#### Implementation Details:
+- Modified `trainers/mine_privacy_trainer.py` to save only encoder state_dict: `torch.save(self.main_model.encoder.state_dict(), model_name)`
+- Updated `utils/representation_extractor.py` with specialized MINE checkpoint loading logic
+- Maintained backward compatibility with existing checkpoint formats
+- Enhanced error handling and debugging output for checkpoint loading
+
+#### Usage Example:
+```bash
+# Train MINE model
+python train_unified.py --feature_type mel --mode mine --mine_model_type timeaware --privacy_weight 0.3
+
+# Evaluate with AIA attack
+python train_unified.py --feature_type mel --mode aia \
+    --checkpoint_paths checkpoints/last_epoch_model_mel_timeaware_fold_1.pth,... \
+    --attack_type gender --target_model_mode mine
+```
 
 **Status**: Implementation completed - all core functionality integrated
 
@@ -188,16 +230,61 @@ python train_unified.py --mode aia --feature_type mel \
   --attack_type gender --target_model_mode vib --input_mode concatenation
 ```
 
+### Current Phase: MINE (Mutual Information Neural Estimation) Privacy Protection - COMPLETED ✅
+
+**Status**: Implementation completed - all core functionality integrated
+
+**Objective**: Implement MINE-based privacy protection to minimize mutual information between acoustic features and semantic information while preserving utility for mental health classification.
+
+#### Successfully Implemented Features:
+- ✅ **Two MINE Architectures**: TimeAware-MINE with cross-modal attention and Standard-MINE for direct feature comparison
+- ✅ **Two-Stage Training**: Alternating MINE estimator updates and main model updates with privacy-utility trade-off
+- ✅ **Privacy-Utility Optimization**: Combines utility loss L_Utility = -E[log P_θ(Y|Z)] with privacy loss L_Privacy = I(Z;S)
+- ✅ **Differential Privacy Integration**: Optional DP-SGD combination with MINE for enhanced privacy protection
+- ✅ **Unified Framework Integration**: All MINE modes accessible through `train_unified.py` with new `--mode mine` option
+- ✅ **Complete Configuration System**: MINEConfig with full parameter management for both model types
+- ✅ **Flexible Model Selection**: Support for TimeAware and Standard MINE variants via configuration
+- ✅ **Cross-Modal Processing**: Text encoding with BERT and audio encoding with Transformer for semantic-acoustic MI estimation
+
+#### MINE Architecture Details:
+
+**TimeAware-MINE**:
+- Cross-modal attention alignment between acoustic features Z and semantic features S
+- Joint representation construction: h = [z_agg; c_agg; z_agg ⊙ c_agg]
+- Statistic network T(h) for mutual information lower bound estimation
+- Supports MEL spectrograms with temporal sequence processing
+
+**Standard-MINE**:
+- Direct two-variable mutual information estimation T(x,y)
+- Simpler architecture for efficient training
+- Suitable for both OpenSMILE and MEL features after pooling
+
+#### Usage Examples:
+```bash
+# TimeAware MINE with OpenSMILE features
+python train_unified.py --feature_type opensmile --mode mine \
+    --mine_model_type timeaware --privacy_weight 0.3 --mine_lr 1e-4
+
+# Standard MINE with MEL features and DP protection
+python train_unified.py --feature_type mel --mode mine \
+    --mine_model_type standard --privacy_weight 0.2 --enable_dp --epsilon 4.0
+
+# TimeAware MINE with custom audio encoder settings
+python train_unified.py --feature_type mel --mode mine \
+    --mine_model_type timeaware --audio_d_model 128 --audio_nhead 8 \
+    --target_dim 768 --privacy_weight 0.25
+```
+
 ### Next Phase: Experimental Validation and Analysis
 
-**Objective**: Execute comprehensive AIA experiments and analyze privacy leakage across different training methods.
+**Objective**: Execute comprehensive experiments across all privacy methods (DP, VIB, MINE, AIA) and analyze privacy-utility trade-offs.
 
-#### Phase 4: Experimental Execution
-- **Gender Attack Experiments**: Test all model types (Normal, DP, VIB) with both feature types
-- **Age Level Attack Experiments**: Evaluate 5-category age prediction across privacy methods
-- **Education Level Attack Experiments**: Assess education information leakage
-- **Comparative Analysis**: Generate detailed privacy protection effectiveness reports
-- **Results Documentation**: Update examples.md and README.md with experimental findings
+#### Phase 4: Comprehensive Privacy Evaluation
+- **MINE Privacy Experiments**: Test TimeAware and Standard MINE with different privacy weights
+- **Cross-Method Comparison**: Compare privacy protection effectiveness across DP, VIB, and MINE approaches
+- **AIA Evaluation**: Test all privacy methods against attribute inference attacks
+- **Privacy-Utility Analysis**: Quantify trade-offs between privacy protection and classification accuracy
+- **Results Documentation**: Update examples.md and README.md with comprehensive experimental findings
 
 #### Implementation Strategy
 - Execute experiments using completed AIA framework through `train_unified.py`

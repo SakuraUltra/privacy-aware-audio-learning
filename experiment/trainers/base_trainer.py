@@ -231,12 +231,13 @@ class BaseExperimentTrainer:
             all_fold_best_metrics['f1'].append(target_epoch_metrics['f1'])
             all_fold_best_metrics['auc'].append(target_epoch_metrics['auc'])
 
-        # 计算平均结果
+        # 计算平均结果和标准差
         print(f"\n--- Average BEST Metrics Across All {self.config.general['num_folds']} Folds ---")
         avg_metrics = {}
         for metric_name, values in all_fold_best_metrics.items():
             avg_value = sum(values) / len(values)
+            std_value = (sum((x - avg_value) ** 2 for x in values) / len(values)) ** 0.5
             avg_metrics[metric_name] = avg_value
-            print(f"  Average BEST {metric_name.capitalize()}: {avg_value:.4f}")
+            print(f"  Average BEST {metric_name.capitalize()}: {avg_value:.4f} ± {std_value:.4f}")
 
         return avg_metrics

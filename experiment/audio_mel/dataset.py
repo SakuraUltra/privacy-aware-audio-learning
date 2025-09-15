@@ -80,6 +80,46 @@ class AudioMelDataset(Dataset):
         
         return feature_path
 
+    def _load_text_for_slice(self, audio_path: str) -> str:
+        """
+        根据音频路径加载对应的文本内容
+        
+        Args:
+            audio_path: 音频文件路径，例如：'/path/to/slices_64/01_CF56_1/01_CF56_1_slice01.wav'
+        
+        Returns:
+            str: 对应的文本内容，如果找不到返回空字符串
+        """
+        try:
+            from pathlib import Path
+            
+            # 从音频路径提取slice信息
+            # 例如：'/path/to/slices_64/01_CF56_1/01_CF56_1_slice01.wav' -> '01_CF56_1_slice01'
+            audio_path = Path(audio_path)
+            slice_name = audio_path.stem  # 去掉扩展名
+            
+            # 提取speaker_id (例如：'01_CF56_1_slice01' -> '01_CF56_1')
+            parts = slice_name.split('_')
+            if len(parts) >= 3:
+                speaker_id = '_'.join(parts[:3])  # 取前三部分作为speaker_id
+                
+                # 构建文本文件路径
+                text_file_path = f"data/slices_txt_64/{speaker_id}/{slice_name}.txt"
+                
+                # 尝试读取文本文件
+                if Path(text_file_path).exists():
+                    with open(text_file_path, 'r', encoding='utf-8') as f:
+                        text_content = f.read().strip()
+                        return text_content
+                else:
+                    print(f"Warning: Text file not found: {text_file_path}")
+                    
+        except Exception as e:
+            print(f"Error loading text for {audio_path}: {e}")
+        
+        # 如果找不到对应文本，返回默认文本
+        return "Audio content for privacy analysis."
+
     def _fit_scaler(self):
         """计算特征标准化参数（与OpenSMILEAudioDataset相同的方法）"""
         all_features = []
@@ -214,12 +254,18 @@ class AudioMelDataset(Dataset):
             # 获取标签
             speaker_id = row['speaker_id']
             label = self.label_mapping.get(speaker_id, 0)
-            return features, label, speaker_id
+            
+            # 加载对应的文本（如果存在path列）
+            text = ""
+            if 'path' in row:
+                text = self._load_text_for_slice(row['path'])
+            
+            return features, label, speaker_id, text
         except Exception as e:
             print(f"加载样本失败 {idx}: {e}")
             # 返回零特征（使用32维，与配置一致）
             features = torch.zeros((1, 32), dtype=torch.float32)
-            return features, 0, "unknown"
+            return features, 0, "unknown", ""
     
 
     
@@ -245,7 +291,7 @@ def collate_fn_mel_padding(batch):
     """
     MEL特征的collate函数，与OpenSMILE的collate_fn_with_padding保持兼容
     """
-    features, labels, speaker_ids = zip(*batch)
+    features, labels, speaker_ids, texts = zip(*batch)
 
     # 找到最大序列长度
     max_len = max(f.shape[0] for f in features)
@@ -276,11 +322,8 @@ def collate_fn_mel_padding(batch):
     labels_batch = torch.tensor(labels, dtype=torch.long)
     padding_masks_batch = torch.stack(padding_masks)  # [batch_size, max_len]
 
-    # 为了与OpenSMILE的collate函数完全兼容，返回5个元素
-    # 添加一个dummy的asr_labels
-    dummy_asr_labels = torch.zeros_like(labels_batch)
-
-    return features_batch, labels_batch, padding_masks_batch, speaker_ids, dummy_asr_labels
+    # 返回5个元素以与训练循环兼容：features, labels, padding_masks, speaker_ids, texts
+    return features_batch, labels_batch, padding_masks_batch, speaker_ids, texts
 
 
 class MelDatasetConverter:

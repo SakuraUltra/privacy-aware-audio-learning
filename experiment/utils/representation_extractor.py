@@ -38,7 +38,7 @@ class RepresentationExtractor:
         Args:
             checkpoint_path: 模型检查点路径
             feature_type: 特征类型 ('opensmile' 或 'mel')
-            model_mode: 模型训练模式 ('normal', 'dp', 'vib')
+            model_mode: 模型训练模式 ('normal', 'dp', 'vib', 'mine')
             **model_kwargs: 额外的模型参数
             
         Returns:
@@ -61,7 +61,8 @@ class RepresentationExtractor:
                 vib_cfg=vib_cfg
             )
         else:
-            # Normal 和 DP 模式使用相同的模型架构
+            # Normal、DP 和 MINE 模式使用相同的模型架构
+            # MINE模式的检查点中主模型部分与normal/dp完全相同
             model = TransformerClassifier(
                 d_model=config.get_model_input_dim(),
                 nhead=config.model['nhead'],
@@ -71,39 +72,85 @@ class RepresentationExtractor:
                 dropout=config.model['dropout']
             )
         
-        # 加载检查点
-        checkpoint = torch.load(checkpoint_path, map_location=self.device)
+        # 加载检查点 - 简化MINE模式处理
+        try:
+            checkpoint = torch.load(checkpoint_path, map_location=self.device)
+        except Exception as e:
+            print(f"Error loading checkpoint {checkpoint_path}: {e}")
+            try:
+                checkpoint = torch.load(checkpoint_path, map_location=self.device, weights_only=False)
+                print("Loaded with weights_only=False")
+            except Exception as e2:
+                print(f"Failed to load checkpoint: {e2}")
+                raise e2
         
         # 处理不同的检查点格式
-        if 'model_state_dict' in checkpoint:
-            state_dict = checkpoint['model_state_dict']
-        elif 'state_dict' in checkpoint:
-            state_dict = checkpoint['state_dict']
-        else:
+        try:
+            if 'main_model_state_dict' in checkpoint:
+                # MINE模式的旧格式检查点
+                state_dict = checkpoint['main_model_state_dict']
+                print("Loaded from main_model_state_dict")
+            elif 'model_state_dict' in checkpoint:
+                state_dict = checkpoint['model_state_dict']
+                print("Loaded from model_state_dict")
+            elif 'state_dict' in checkpoint:
+                state_dict = checkpoint['state_dict']
+                print("Loaded from state_dict")
+            else:
+                # 对于直接保存的state_dict（新的MINE模式）
+                state_dict = checkpoint
+                print("Loaded as direct state_dict")
+        except Exception as e:
+            print(f"Error processing checkpoint format: {e}")
+            # 如果处理checkpoint格式失败，尝试直接使用checkpoint作为state_dict
             state_dict = checkpoint
+            print("Using checkpoint directly as state_dict")
         
-        # 处理DP模型的状态字典
-        if model_mode == 'dp':
-            # 对于DP模型，使用更宽松的加载方式
+        # 处理MINE模式的状态字典加载
+        if model_mode == 'mine':
             try:
-                model.load_state_dict(state_dict, strict=False)
-                print("⚠️  DP model loaded with strict=False (some keys may be missing)")
-            except Exception as e:
-                print(f"❌ Failed to load DP checkpoint: {e}")
-                # 尝试使用eval_encoder的参数
-                if any(key.startswith('eval_encoder.') for key in state_dict.keys()):
-                    print("🔄 Trying to load from eval_encoder...")
-                    eval_state_dict = {}
-                    for key, value in state_dict.items():
-                        if key.startswith('eval_encoder.'):
-                            new_key = key.replace('eval_encoder.', 'encoder.')
-                            eval_state_dict[new_key] = value
-                    model.load_state_dict(eval_state_dict, strict=False)
-                    print("✅ Loaded from eval_encoder parameters")
+                # 新的MINE模式：直接保存的encoder state_dict
+                if isinstance(checkpoint, dict) and all(key.startswith(('encoder.', 'layers.', 'norm.', 'fc.')) for key in checkpoint.keys()):
+                    # 这是encoder-only的state_dict，直接加载到model.encoder
+                    model.encoder.load_state_dict(checkpoint, strict=False)
+                    print("✅ Loaded MINE encoder-only checkpoint")
+                elif 'main_model_state_dict' in checkpoint:
+                    # 旧的MINE格式：包含完整模型的checkpoint
+                    state_dict = checkpoint['main_model_state_dict']
+                    model.load_state_dict(state_dict, strict=False)
+                    print("✅ Loaded MINE checkpoint from main_model_state_dict")
                 else:
-                    raise e
+                    # 尝试直接加载
+                    model.load_state_dict(checkpoint, strict=False)
+                    print("✅ Loaded MINE checkpoint directly")
+            except Exception as e:
+                print(f"❌ Failed to load MINE checkpoint: {e}")
+                raise e
         else:
-            model.load_state_dict(state_dict)
+            # 处理其他模式（normal, dp, vib）的状态字典
+            if model_mode == 'dp':
+                # 对于DP模型，使用更宽松的加载方式
+                try:
+                    model.load_state_dict(state_dict, strict=False)
+                    print("⚠️  DP model loaded with strict=False (some keys may be missing)")
+                except Exception as e:
+                    print(f"❌ Failed to load DP checkpoint: {e}")
+                    # 尝试使用eval_encoder的参数
+                    if any(key.startswith('eval_encoder.') for key in state_dict.keys()):
+                        print("🔄 Trying to load from eval_encoder...")
+                        eval_state_dict = {}
+                        for key, value in state_dict.items():
+                            if key.startswith('eval_encoder.'):
+                                new_key = key.replace('eval_encoder.', 'encoder.')
+                                eval_state_dict[new_key] = value
+                        model.load_state_dict(eval_state_dict, strict=False)
+                        print("✅ Loaded from eval_encoder parameters")
+                    else:
+                        raise e
+            else:
+                # 对于normal和vib模式，使用严格加载
+                model.load_state_dict(state_dict)
+                print(f"✅ Loaded {model_mode} checkpoint")
         
         model.to(self.device)
         model.eval()

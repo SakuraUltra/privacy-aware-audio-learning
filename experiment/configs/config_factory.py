@@ -6,6 +6,7 @@ from .base_config import BaseConfig
 from .opensmile_config import OpenSMILEConfig
 from .mel_config import MELConfig
 from .aia_config import AIAConfig
+from .mine_config import MINEConfig
 
 
 class ConfigFactory:
@@ -26,12 +27,12 @@ class ConfigFactory:
         
         Args:
             feature_type: 特征类型 ('opensmile' 或 'mel')
-            mode: 实验模式 ('normal', 'dp', 'vib', 'aia')
+            mode: 实验模式 ('normal', 'dp', 'vib', 'aia', 'mine')
             epsilon: DP模式下的epsilon值
             z_dim: VIB模式下的隐变量维度
             beta: VIB模式下的KL正则化强度
             mc_samples: VIB模式下的MC采样次数
-            **kwargs: 其他配置参数（AIA模式下包括checkpoint_paths, attack_type等）
+            **kwargs: 其他配置参数（AIA模式下包括checkpoint_paths, attack_type等；MINE模式下包括mine_model_type, privacy_weight等）
         
         Returns:
             配置对象
@@ -68,6 +69,26 @@ class ConfigFactory:
             if aia_params:
                 config.update_aia_params(**aia_params)
                 
+        elif mode.lower() == 'mine':
+            # MINE模式使用专门的配置类
+            config = MINEConfig()
+            config.feature_type = feature_type.lower()
+            
+            # 设置MINE特定参数
+            if 'mine_model_type' in kwargs:
+                config.set_mine_model_type(kwargs['mine_model_type'])
+            if 'privacy_weight' in kwargs:
+                config.set_privacy_weight(kwargs['privacy_weight'])
+            if 'task_type' in kwargs:
+                config.set_task_type(kwargs['task_type'])
+            
+            # 更新其他MINE参数
+            mine_params = {k: v for k, v in kwargs.items() 
+                         if k in config.mine_params and k not in [
+                             'mine_model_type', 'privacy_weight', 'task_type']}
+            if mine_params:
+                config.update_mine_params(**mine_params)
+                
         elif feature_type.lower() == 'opensmile':
             config = OpenSMILEConfig()
         elif feature_type.lower() == 'mel':
@@ -75,8 +96,8 @@ class ConfigFactory:
         else:
             raise ValueError(f"Unsupported feature type: {feature_type}")
 
-        # 对于非AIA模式，设置实验模式
-        if mode.lower() != 'aia':
+        # 对于非AIA和非MINE模式，设置实验模式
+        if mode.lower() not in ['aia', 'mine']:
             # 设置实验模式
             config.set_experiment_mode(mode.lower())
 
@@ -106,4 +127,4 @@ class ConfigFactory:
     @staticmethod
     def get_available_modes():
         """获取可用的实验模式"""
-        return ['normal', 'dp', 'vib', 'aia']
+        return ['normal', 'dp', 'vib', 'aia', 'mine']

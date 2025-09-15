@@ -161,7 +161,7 @@ class AIAConfig(BaseConfig):
     
     def set_target_model_mode(self, mode: str):
         """设置目标模型的训练模式"""
-        valid_modes = ['normal', 'dp', 'vib']
+        valid_modes = ['normal', 'dp', 'vib', 'mine']
         if mode not in valid_modes:
             raise ValueError(f"Invalid target model mode: {mode}. Must be one of {valid_modes}")
         self.aia_params['target_model_mode'] = mode
@@ -227,7 +227,7 @@ class AIAConfig(BaseConfig):
             raise ValueError(f"Invalid attack type: {self.aia_params['attack_type']}")
         
         # 检查目标模型模式
-        if self.aia_params['target_model_mode'] not in ['normal', 'dp', 'vib']:
+        if self.aia_params['target_model_mode'] not in ['normal', 'dp', 'vib', 'mine']:
             raise ValueError(f"Invalid target model mode: {self.aia_params['target_model_mode']}")
         
         print("AIA config validation passed")
