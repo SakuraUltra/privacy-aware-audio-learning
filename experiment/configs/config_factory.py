@@ -5,7 +5,6 @@ from typing import Optional
 from .base_config import BaseConfig
 from .opensmile_config import OpenSMILEConfig
 from .mel_config import MELConfig
-from .whisper_lora_config import WhisperLoRAConfig
 
 
 class ConfigFactory:

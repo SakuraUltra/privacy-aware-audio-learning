@@ -1,0 +1,8 @@
+# Core Normal / DP-experiment / VIB paths. Legacy Whisper LoRA is not maintained.
+# Compatibility ranges; these are not a historical experiment lockfile.
+torch>=2.6,<3
+numpy>=1.26,<3
+pandas>=2.2,<3
+scikit-learn>=1.5,<2
+opacus>=1.5,<2
+tqdm>=4.66,<5

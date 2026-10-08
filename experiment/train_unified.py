@@ -7,14 +7,6 @@ import sys
 import argparse
 from pathlib import Path
 
-from configs.config_factory import ConfigFactory
-from trainers.base_trainer import BaseExperimentTrainer
-from trainers.vib_trainer import VIBTrainer
-from trainers.whisper_lora_trainer import WhisperLoRATrainer
-from configs.whisper_lora_config import WhisperLoRAConfig
-from utils.logging import setup_experiment_logging
-from utils.whisper_mel_adapter import create_mel_datasets_for_cv, create_mel_train_eval_datasets
-
 
 def parse_arguments():
     """解析命令行参数"""
@@ -25,7 +17,10 @@ def parse_arguments():
                         help="Feature type: 'opensmile' or 'mel'")
     parser.add_argument('--mode', type=str, default='normal',
                         choices=['normal', 'dp', 'vib', 'whisper_lora'],
-                        help="Training mode: 'normal', 'dp' (Differential Privacy), 'vib' (Variational Information Bottleneck), or 'whisper_lora' (Whisper LoRA Fine-tuning)")
+                        help="Training mode: 'normal', 'dp' (Differential Privacy), 'vib' (Variational Information Bottleneck), or 'whisper_lora' (legacy, unmaintained)")
+
+    parser.add_argument('--smoke-test', action='store_true',
+                        help="CPU model self-check on synthetic features; normal/vib only, no dataset or downloads")
 
     # VIB相关参数
     parser.add_argument('--z_dim', type=int, default=64, help="VIB latent dimension")
@@ -47,17 +42,31 @@ def parse_arguments():
     parser.add_argument('--use_cv', action='store_true',
                         help='Use 5-fold cross validation for whisper_lora mode')
 
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.smoke_test and args.mode not in ('normal', 'vib'):
+        parser.error('--smoke-test supports normal/vib only; it does not validate DP training')
+    if args.epochs < 1 or args.batch_size < 1:
+        parser.error('--epochs and --batch_size must be positive')
+    return args
 
 
 def main():
     """主函数"""
     args = parse_arguments()
     
-    # 设置日志
-    log_file = setup_experiment_logging(args.feature_type, args.mode, args.epsilon if args.mode == 'dp' else None)
-    
     try:
+        if args.smoke_test:
+            from utils.smoke import run_model_smoke_test
+            run_model_smoke_test(args.feature_type, args.mode)
+            return 0
+
+        # Load ML dependencies only after parsing --help / validating arguments.
+        from configs.config_factory import ConfigFactory
+        from trainers.base_trainer import BaseExperimentTrainer
+        from trainers.vib_trainer import VIBTrainer
+        from utils.logging import setup_experiment_logging
+
+        log_file = setup_experiment_logging(args.feature_type, args.mode, args.epsilon if args.mode == 'dp' else None)
         print("=" * 60)
         print(f"Starting Unified Training Framework")
         print(f"Feature Type: {args.feature_type.upper()}")
@@ -80,6 +89,10 @@ def main():
             print("=" * 60)
 
         if args.mode == 'whisper_lora':
+            # Historical LoRA dependencies must not block active training modes.
+            from trainers.whisper_lora_trainer import WhisperLoRATrainer
+            from configs.whisper_lora_config import WhisperLoRAConfig
+            from utils.whisper_mel_adapter import create_mel_datasets_for_cv, create_mel_train_eval_datasets
             # Whisper LoRA 使用专门的配置
             config = WhisperLoRAConfig()
         else:
@@ -117,6 +130,8 @@ def main():
                 'lr': args.lr,
             })
         
+        Path("checkpoints").mkdir(parents=True, exist_ok=True)
+
         # 根据模式选择合适的训练器
         if args.mode == 'vib':
             print("Using VIBTrainer for VIB mode...")
@@ -178,14 +193,14 @@ def main():
         print(f"Log file: {log_file}")
         print("=" * 60)
         
-        return avg_metrics
+        return 0
         
     except Exception as e:
         print(f"❌ Training failed with error: {e}")
         import traceback
         traceback.print_exc()
-        return None
+        return 1
 
 
 if __name__ == '__main__':
-    main()
+    sys.exit(main())
