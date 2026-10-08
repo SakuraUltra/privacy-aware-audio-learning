@@ -12,6 +12,7 @@ from typing import Dict, Any, Tuple, Optional
 import warnings
 
 from utils.utils import set_seed
+from utils.reporting import summarize_fold_metrics
 from models.transformer import TransformerClassifier
 from .core_trainer import CoreTrainer
 from utils.data_utils import load_and_validate_data, split_data_by_folds
@@ -181,7 +182,7 @@ class BaseExperimentTrainer:
                 model_name = f'checkpoints/last_epoch_model_{self.config.feature_type}_{self.config.experiment_mode}_fold_{val_fold_num}.pth'
                 torch.save(model.state_dict(), model_name)
 
-        print(f"\n--- Fold {fold_idx + 1}/{self.config.general['num_folds']} (Validation Fold: {val_fold_num}) BEST Results ---")
+        print(f"\n--- Fold {fold_idx + 1}/{self.config.general['num_folds']} (Validation Fold: {val_fold_num}) Last-Epoch Results ---")
         if target_epoch_metrics:
             print(f"  Last Training Loss: {target_epoch_metrics['loss']:.4f}")
             print(f"  Last Val Speaker-Level - Acc: {target_epoch_metrics['acc']:.4f}, P: {target_epoch_metrics['p']:.4f}, R: {target_epoch_metrics['r']:.4f}, F1: {target_epoch_metrics['f1']:.4f}, AUC: {target_epoch_metrics['auc']:.4f}")
@@ -231,12 +232,13 @@ class BaseExperimentTrainer:
             all_fold_best_metrics['f1'].append(target_epoch_metrics['f1'])
             all_fold_best_metrics['auc'].append(target_epoch_metrics['auc'])
 
-        # 计算平均结果
-        print(f"\n--- Average BEST Metrics Across All {self.config.general['num_folds']} Folds ---")
-        avg_metrics = {}
-        for metric_name, values in all_fold_best_metrics.items():
-            avg_value = sum(values) / len(values)
-            avg_metrics[metric_name] = avg_value
-            print(f"  Average BEST {metric_name.capitalize()}: {avg_value:.4f}")
+        # Report the final-epoch fold metrics, with sample standard deviation.
+        print(f"\n--- Last-Epoch Metrics Across {self.config.general['num_folds']} Folds (mean ± std) ---")
+        avg_metrics = summarize_fold_metrics(
+            all_fold_best_metrics, expected_folds=self.config.general['num_folds']
+        )
+        for metric_name in all_fold_best_metrics:
+            print(f"  {metric_name.capitalize()}: {avg_metrics[metric_name]:.4f} ± "
+                  f"{avg_metrics[metric_name + '_std']:.4f}")
 
         return avg_metrics

@@ -17,3 +17,10 @@ draft
 experiment/logs/
 whisper_finetune/outputs/
 whisper_finetune/lightning_logs/
+# Local environments, caches and generated checkpoints
+.venv/
+__pycache__/
+.DS_Store
+experiment/checkpoints/
+# Keep the installation manifest despite the historical *.txt rule.
+!requirements.txt

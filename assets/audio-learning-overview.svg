@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 500" role="img" aria-labelledby="title desc">
+<title id="title">Privacy-Aware Audio Learning research map</title>
+<desc id="desc">OpenSMILE or MEL features feed Transformer models with Normal, encoder-only DP experiments, or Variational Information Bottleneck paths. The evaluation code uses speaker-level aggregation and five-fold summaries. Synthetic model checks do not establish benchmark accuracy or privacy guarantees.</desc>
+<defs>
+  <linearGradient id="bg" x2="1" y2="1"><stop stop-color="#15132f"/><stop offset="1" stop-color="#203143"/></linearGradient>
+  <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0L10 5L0 10z" fill="#a2b4e0"/></marker>
+  <style>text{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif}.title{font-size:20px;fill:#f1f2ff;font-weight:650}.sub{font-size:16px;fill:#b8c4db}.line{stroke:#a2b4e0;stroke-width:2;fill:none;marker-end:url(#arrow)}</style>
+</defs>
+<rect width="1200" height="500" rx="24" fill="url(#bg)"/>
+<text x="48" y="50" font-size="15" font-weight="700" letter-spacing="3" fill="#c2afff">PRIVACY-AWARE AUDIO LEARNING</text>
+<text x="48" y="103" font-size="40" font-weight="750" fill="#fff">Learn from sound. Examine what remains.</text>
+<text x="48" y="141" font-size="20" fill="#c0cbe0">Audio classification · Transformer representations · Information bottlenecks</text>
+<rect x="48" y="201" width="252" height="214" rx="16" fill="#252740" stroke="#535b7e"/>
+<text x="72" y="237" class="title">Acoustic features</text>
+<path d="M75 282h12l8-20 10 39 10-60 10 72 10-45 10 29 10-16h105" stroke="#a99aff" stroke-width="3" fill="none"/>
+<text x="72" y="348" class="sub">OpenSMILE · 32 dimensions</text><text x="72" y="381" class="sub">MEL · 80 dimensions</text>
+<path d="M303 308h51" class="line"/>
+<rect x="367" y="201" width="418" height="214" rx="16" fill="#252740" stroke="#535b7e"/>
+<text x="391" y="237" class="title">Transformer training paths</text>
+<rect x="390" y="259" width="369" height="36" rx="8" fill="#314a51"/><text x="405" y="283" class="sub" style="fill:#aff1d9">Normal: classification baseline</text>
+<rect x="390" y="309" width="369" height="36" rx="8" fill="#4d3d40"/><text x="405" y="333" class="sub" style="fill:#f5ceb0">DP: encoder-only experiment</text>
+<rect x="390" y="359" width="369" height="36" rx="8" fill="#3a345d"/><text x="405" y="383" class="sub" style="fill:#ddd0ff">VIB: latent compression + KL</text>
+<path d="M788 308h49" class="line"/>
+<rect x="850" y="201" width="302" height="214" rx="16" fill="#252740" stroke="#535b7e"/>
+<text x="874" y="237" class="title">Speaker-level evaluation</text>
+<text x="874" y="286" class="sub">Five-fold cross-validation</text><text x="874" y="327" class="sub">Mean ± sample std</text><text x="874" y="369" class="sub">Explicit research limitations</text>
+<path d="M48 443h1104" stroke="#535b7e"/>
+<text x="48" y="475" font-size="15" fill="#afbdd4">Research map · Synthetic CPU self-checks available · Dataset experiments and privacy guarantees require further validation</text>
+</svg>
